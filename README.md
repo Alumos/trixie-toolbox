@@ -14,21 +14,21 @@
 
 ### 方式一：一条命令（推荐）
 
-{B}bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/Alumos/trixie-toolbox/main/vps-init.sh)
-{B}
+```bash
+curl -fsSL -o /tmp/vps-init.sh https://raw.githubusercontent.com/Alumos/trixie-toolbox/main/vps-init.sh && bash /tmp/vps-init.sh
+```
 
 ### 方式二：网络不好时走镜像加速
 
-{B}bash
-sudo bash <(curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/Alumos/trixie-toolbox/main/vps-init.sh)
-{B}
+```bash
+curl -fsSL -o /tmp/vps-init.sh https://gh-proxy.com/https://raw.githubusercontent.com/Alumos/trixie-toolbox/main/vps-init.sh && bash /tmp/vps-init.sh
+```
 
-> {B}gh-proxy.com{B} 是第三方 GitHub 加速服务，只做转发。不放心源文件的话，可以用方式三先下载后自己看一眼。
+> `gh-proxy.com` 是第三方 GitHub 加速服务，只做转发。不放心源文件的话，可以用方式三先下载后自己看一眼。
 
 ### 方式三：先下载再执行（最稳）
 
-{B}bash
+```bash
 # 官方源
 curl -fsSL -o /tmp/vps-init.sh https://raw.githubusercontent.com/Alumos/trixie-toolbox/main/vps-init.sh
 
@@ -36,29 +36,31 @@ curl -fsSL -o /tmp/vps-init.sh https://raw.githubusercontent.com/Alumos/trixie-t
 # curl -fsSL -o /tmp/vps-init.sh https://gh-proxy.com/https://raw.githubusercontent.com/Alumos/trixie-toolbox/main/vps-init.sh
 
 sudo bash /tmp/vps-init.sh
-{B}
+```
 
 没有 curl 的话：
 
-{B}bash
+```bash
 apt-get update && apt-get install -y curl
-{B}
+```
 
 或者用 wget：
 
-{B}bash
+```bash
 wget -qO /tmp/vps-init.sh https://gh-proxy.com/https://raw.githubusercontent.com/Alumos/trixie-toolbox/main/vps-init.sh
 sudo bash /tmp/vps-init.sh
-{B}
+```
 
-> ⚠️ **不要**写成 {B}curl ... | sudo bash{B}。脚本是交互式菜单，管道会占用 stdin，菜单会按不动。
-> {B}sudo bash <(curl ...){B} 用的是进程替换，stdin 仍然是当前终端，菜单可以正常操作。
+> ⚠️ **不要**写成 `curl ... | sudo bash`：脚本是交互式菜单，管道会占用 stdin，菜单会按不动。
+>
+> ⚠️ 也**不建议**写成 `bash <(curl ...)`：进程替换在部分系统上会因 `sudo` 缺失或脚本提前退出而断开管道，curl 报 `(23) Failure writing output to destination`。
+> 先下载到 `/tmp` 再执行最稳，失败也不会跑半截。
 
 ---
 
 ## 它做了什么
 
-1. 安装 {B}curl{B} / {B}wget{B} / {B}sudo{B} / {B}nftables{B}
+1. 安装 `curl` / `wget` / `sudo` / `nftables`
 2. 检测并停用冲突的 ufw / firewalld（会先询问）
 3. 用 nftables 接管本机防火墙
 4. 防火墙**默认不启用**，需要手动开启
@@ -68,17 +70,17 @@ sudo bash /tmp/vps-init.sh
 
 主菜单：
 
-{B}{B}{B}
+```
 1) 防火墙管理
 2) 基础环境 / 依赖安装
 3) 查看系统信息
 4) 使用帮助
 q) 退出
-{B}{B}{B}
+```
 
 防火墙管理：
 
-{B}{B}{B}
+```
 1) 启用防火墙
 2) 关闭防火墙
 3) 查看当前规则
@@ -87,9 +89,9 @@ q) 退出
 6) 查看已配置端口
 7) 恢复默认放行端口
 b) 返回主菜单
-{B}{B}{B}
+```
 
-放行新端口的流程：输入端口号（支持 {B}8080,8443{B} 多端口）→ 选择 TCP / UDP / Both → 填写备注（可选，直接回车跳过）。
+放行新端口的流程：输入端口号（支持 `8080,8443` 多端口）→ 选择 TCP / UDP / Both → 填写备注（可选，直接回车跳过）。
 
 ---
 
@@ -116,16 +118,16 @@ b) 返回主菜单
 ## 防火墙行为说明
 
 - **默认关闭**：nftables 服务不启用，没有加载任何规则，所有端口均可访问。
-- **开启后**：{B}input{B} 链策略为 {B}drop{B}，只放行：配置表里的端口、已建立的连接（{B}ct state established,related{B}）、ICMP（ping 等）、本地回环。
-- {B}forward{B} 与 {B}output{B} 为 {B}accept{B}，避免误伤 Docker 等需要转发的场景。
-- 规则持久化在 {B}/etc/trixie-toolbox/trixie-toolbox.nft{B}，开机由 {B}nftables.service{B} 自动加载。
-- 每次启用 / 重载规则前会自动备份当前的 {B}nftables.conf{B} 和规则集到 {B}/etc/trixie-toolbox/backups/{B}。
+- **开启后**：`input` 链策略为 `drop`，只放行：配置表里的端口、已建立的连接（`ct state established,related`）、ICMP（ping 等）、本地回环。
+- `forward` 与 `output` 为 `accept`，避免误伤 Docker 等需要转发的场景。
+- 规则持久化在 `/etc/trixie-toolbox/trixie-toolbox.nft`，开机由 `nftables.service` 自动加载。
+- 每次启用 / 重载规则前会自动备份当前的 `nftables.conf` 和规则集到 `/etc/trixie-toolbox/backups/`。
 
 ## SSH 断连保护
 
-- 启用防火墙前会检测 {B}sshd{B} 实际监听端口（{B}ss{B} + {B}sshd_config{B} 双重检测），如果不在放行列表里会提示自动加入。
-- 通过 SSH 会话启用防火墙时，会启动 **30 秒自动回滚**：30 秒内没有输入 {B}y{B} 确认，规则自动撤销并关闭防火墙，避免把自己锁在门外。
-- 想跳过这个保护：{B}TTB_NO_ROLLBACK=1 sudo -E bash vps-init.sh{B}
+- 启用防火墙前会检测 `sshd` 实际监听端口（`ss` + `sshd_config` 双重检测），如果不在放行列表里会提示自动加入。
+- 通过 SSH 会话启用防火墙时，会启动 **30 秒自动回滚**：30 秒内没有输入 `y` 确认，规则自动撤销并关闭防火墙，避免把自己锁在门外。
+- 想跳过这个保护：`TTB_NO_ROLLBACK=1 sudo -E bash vps-init.sh`
 
 ---
 
@@ -133,12 +135,12 @@ b) 返回主菜单
 
 | 路径 | 说明 |
 | --- | --- |
-| {B}/etc/trixie-toolbox/ports.db{B} | 放行端口配置（{B}端口\|协议\|备注{B}） |
-| {B}/etc/trixie-toolbox/trixie-toolbox.nft{B} | 自动生成的 nftables 规则 |
-| {B}/etc/trixie-toolbox/firewall.state{B} | 防火墙状态记录 |
-| {B}/etc/trixie-toolbox/backups/{B} | 每次操作的规则 / 配置备份 |
-| {B}/etc/nftables.conf{B} | 由脚本接管，开机加载 |
-| {B}/var/log/trixie-toolbox.log{B} | 操作日志 |
+| `/etc/trixie-toolbox/ports.db` | 放行端口配置（`端口\|协议\|备注`） |
+| `/etc/trixie-toolbox/trixie-toolbox.nft` | 自动生成的 nftables 规则 |
+| `/etc/trixie-toolbox/firewall.state` | 防火墙状态记录 |
+| `/etc/trixie-toolbox/backups/` | 每次操作的规则 / 配置备份 |
+| `/etc/nftables.conf` | 由脚本接管，开机加载 |
+| `/var/log/trixie-toolbox.log` | 操作日志 |
 
 ---
 
@@ -149,29 +151,29 @@ b) 返回主菜单
 - 如果是通过 SSH 开的，等 30 秒会自动回滚。
 - 如果已经断连，用 VPS 控制台 / VNC 登录后执行：
 
-{B}bash
+```bash
 nft flush ruleset
 systemctl disable --now nftables
-{B}
+```
 
 然后重新进菜单，把 SSH 端口加进放行列表再开启。
 
 ### 我改过 SSH 端口
 
-脚本启用时会自动检测 {B}sshd{B} 实际监听端口，检测不到时会提示，确认即可自动加入。
+脚本启用时会自动检测 `sshd` 实际监听端口，检测不到时会提示，确认即可自动加入。
 
 ### 我用了 Docker / 容器
 
-{B}forward{B} 链是 {B}accept{B}，一般不受影响。如果容器网络异常，先检查 Docker 自己写的 iptables 规则，必要时用 {B}iptables -S{B} 对比。
+`forward` 链是 `accept`，一般不受影响。如果容器网络异常，先检查 Docker 自己写的 iptables 规则，必要时用 `iptables -S` 对比。
 
 ### 想手工加端口
 
-{B}bash
+```bash
 # 格式：端口|协议|备注
 echo "8080|tcp|我的服务" >> /etc/trixie-toolbox/ports.db
 # 重载
 systemctl restart nftables
-{B}
+```
 
 或者直接进菜单「防火墙管理 → 放行新端口」。
 
@@ -179,10 +181,10 @@ systemctl restart nftables
 
 菜单里「关闭防火墙」，或者在命令行：
 
-{B}bash
+```bash
 systemctl disable --now nftables
 nft flush ruleset
-{B}
+```
 
 ### 能重复运行吗
 
@@ -192,8 +194,8 @@ nft flush ruleset
 
 ## 安全建议
 
-- {B}3306{B} / {B}5432{B} / {B}6379{B} 默认对公网放行，只适合演示。生产环境建议从菜单里删掉，改走内网或 SSH 隧道。
-- SSH 建议改端口 + 只用密钥登录：{B}PasswordAuthentication no{B}。
+- `3306` / `5432` / `6379` 默认对公网放行，只适合演示。生产环境建议从菜单里删掉，改走内网或 SSH 隧道。
+- SSH 建议改端口 + 只用密钥登录：`PasswordAuthentication no`。
 - 开防火墙前先确认 VPS 面板的「安全组」也放行了对应端口，两个地方都要放行。
 
 ---
