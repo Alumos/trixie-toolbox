@@ -111,6 +111,12 @@ USAGE
 
 require_root() {
     if [ "$(id -u)" -ne 0 ]; then
+        case "$0" in
+            /dev/fd/*|/proc/self/fd/*)
+                err "请以 root 运行: sudo bash <(curl -fsSL <脚本地址>)"
+                exit 1
+                ;;
+        esac
         if command -v sudo >/dev/null 2>&1; then
             exec sudo -E bash "$0" "$@"
         fi
