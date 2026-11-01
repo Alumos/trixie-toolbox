@@ -5,6 +5,7 @@
 | 脚本 | 说明 |
 | --- | --- |
 | [vps-init.sh](vps-init.sh) | VPS 初始化：安装基础依赖 + nftables 接管防火墙 + 终端菜单管理 |
+| [vendor/tcpfit.sh](vendor/tcpfit.sh) | TCP 调优内核，来自 [Kylin010/tcpfit](https://github.com/Kylin010/tcpfit)（MIT） |
 
 ---
 
@@ -73,8 +74,9 @@ sudo bash /tmp/vps-init.sh
 ```
 1) 防火墙管理
 2) 基础环境 / 依赖安装
-3) 查看系统信息
-4) 使用帮助
+3) TCP 调优 (tcpfit)
+4) 查看系统信息
+5) 使用帮助
 q) 退出
 ```
 
@@ -92,6 +94,49 @@ b) 返回主菜单
 ```
 
 放行新端口的流程：输入端口号（支持 `8080,8443` 多端口）→ 选择 TCP / UDP / Both → 填写备注（可选，直接回车跳过）。
+
+---
+
+## TCP 调优（集成 tcpfit）
+
+主菜单 **3) TCP 调优** 进入，内置 [Kylin010/tcpfit](https://github.com/Kylin010/tcpfit) v0.5.9（MIT 许可，版权归 Kylin010）。
+
+tcpfit 不套用固定参数，而是按机器实测 BDP、扫限速器拐点来推导每台机器自己的值。
+
+| 类别 | 参数 |
+| --- | --- |
+| 拥塞控制 | `bbr` + `fq` |
+| 缓冲区 | `tcp_rmem` / `tcp_wmem` / `rmem_max` / `wmem_max` / `tcp_mem` |
+| 窗口 | `tcp_window_scaling` / `tcp_moderate_rcvbuf` / `tcp_adv_win_scale` |
+| 队列 | `netdev_max_backlog` / `netdev_budget` / `somaxconn` |
+| 连接 | `tcp_tw_reuse` / `tcp_fin_timeout` / `ip_local_port_range` |
+| 起步 | `tcp_slow_start_after_idle=0` / `initcwnd 32` |
+| 出向整形 | HTB 上限 + fq pacing |
+
+- 基础调优写 30 个 sysctl 参数，缓冲区按实测推导
+- 首次改动前自动快照，`rollback` 逐项写回原始值
+- 只写 `/etc/sysctl.d/99-tcpfit.conf` 等独立文件，不动 `/etc/sysctl.conf`
+- 需要 Linux + systemd + iproute2；OpenVZ / LXC 上 `tc` 和 `initcwnd` 可能受限
+
+### 入口说明
+
+- 仓库自带 `vendor/tcpfit.sh`，用 `git clone` 后运行 `vps-init.sh` 时直接用本地副本，不联网
+- 如果只下载了单文件 `vps-init.sh`，首次进菜单会提示联网拉取，官方源失败会自动切 `gh-proxy.com` 镜像
+- 也可以单独跑：`bash vendor/tcpfit.sh`
+
+### 常用子命令
+
+```bash
+tcpfit detect                                   # 机器画像
+tcpfit tune --role proxy --bw 500               # 基础调优
+tcpfit sweep --peer <近处iperf3服务器> --nominal 500   # 扫拐点
+tcpfit shape --rate 510                         # 应用整形
+tcpfit status                                   # 当前配置
+tcpfit rollback                                 # 回滚全部改动
+tcpfit uninstall                                # 卸载
+```
+
+> 一键调优约 10 分钟，会问带宽、测速对端、用途三个问题。完整文档见上游：[Kylin010/tcpfit](https://github.com/Kylin010/tcpfit)
 
 ---
 
@@ -202,6 +247,12 @@ nft flush ruleset
 
 ## 更新日志
 
+### v1.1.0
+
+- 主菜单新增「TCP 调优」，集成 tcpfit v0.5.9（内置 `vendor/tcpfit.sh`）
+- 支持本地优先、缺失时联网拉取（含 gh-proxy 镜像兜底）
+- 新增 TCP 状态查看 / 回滚 / 卸载入口
+
 ### v1.0.0
 
 - 初始版本
@@ -212,4 +263,6 @@ nft flush ruleset
 
 ## License
 
-[MIT](LICENSE)
+本仓库主体使用 [MIT](LICENSE)。
+
+`vendor/tcpfit.sh` 来自 [Kylin010/tcpfit](https://github.com/Kylin010/tcpfit)，同样为 MIT 许可，版权归 Kylin010，许可证见 [vendor/tcpfit-LICENSE](vendor/tcpfit-LICENSE)。

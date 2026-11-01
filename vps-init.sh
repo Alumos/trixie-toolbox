@@ -19,7 +19,7 @@
 set -o pipefail
 
 APP_NAME="trixie-toolbox"
-APP_VERSION="1.0.0"
+APP_VERSION="1.1.0"
 APP_TITLE="VPS 初始化工具"
 
 STATE_DIR="/etc/trixie-toolbox"
@@ -53,6 +53,11 @@ DEFAULT_PORTS=(
 RISKY_PORTS=(3306 5432 6379)
 
 REQUIRED_PKGS=(curl wget sudo nftables)
+
+# TCP 调优：内置 vendor/tcpfit.sh，缺失时按 URL 拉取
+TCPFIT_URL="https://raw.githubusercontent.com/Kylin010/tcpfit/main/tcpfit.sh"
+TCPFIT_MIRROR="https://gh-proxy.com/https://raw.githubusercontent.com/Kylin010/tcpfit/main/tcpfit.sh"
+TCPFIT_CACHE="/usr/local/lib/trixie-toolbox/tcpfit.sh"
 
 # ---------------------------------------------------------------------
 #  输出与工具函数
@@ -817,6 +822,146 @@ fw_del_port_interactive() {
     return 0
 }
 
+# ---------------------------------------------------------------------
+#  TCP 调优（tcpfit）
+# ---------------------------------------------------------------------
+tcpfit_script_path() {
+    local here
+    here="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+    if [ -n "$here" ] && [ -f "$here/vendor/tcpfit.sh" ]; then
+        printf '%s\n' "$here/vendor/tcpfit.sh"
+        return 0
+    fi
+    if [ -f "$TCPFIT_CACHE" ]; then
+        printf '%s\n' "$TCPFIT_CACHE"
+        return 0
+    fi
+    return 1
+}
+
+fetch_tcpfit() {
+    local url tmp
+    mkdir -p "$(dirname "$TCPFIT_CACHE")" 2>/dev/null
+    tmp="$TCPFIT_CACHE.tmp"
+    for url in "$TCPFIT_URL" "$TCPFIT_MIRROR"; do
+        info "下载 tcpfit: $url"
+        rm -f "$tmp"
+        if curl -fsSL --connect-timeout 15 -m 300 -o "$tmp" "$url" 2>/dev/null; then
+            if head -1 "$tmp" | grep -q '^#!' \
+                && grep -q '^VERSION=' "$tmp" \
+                && bash -n "$tmp" 2>/dev/null; then
+                mv -f "$tmp" "$TCPFIT_CACHE"
+                chmod +x "$TCPFIT_CACHE"
+                ok "下载完成（$(du -h "$TCPFIT_CACHE" 2>/dev/null | cut -f1)）"
+                return 0
+            fi
+            warn "下载内容校验失败，换下一个源"
+        fi
+    done
+    rm -f "$tmp"
+    return 1
+}
+
+run_tcpfit() {
+    if command -v tcpfit >/dev/null 2>&1; then
+        say "启动已安装的 tcpfit ..."
+        tcpfit
+        return $?
+    fi
+
+    local script
+    if script="$(tcpfit_script_path)"; then
+        say "使用内置 tcpfit: $script"
+    else
+        if ! confirm "本地未找到 tcpfit，需要联网下载（约 240 KB），继续?" y; then
+            return 1
+        fi
+        fetch_tcpfit || { err "tcpfit 下载失败"; return 1; }
+        script="$TCPFIT_CACHE"
+    fi
+
+    say "即将进入 tcpfit 交互界面，退出后回到本菜单。"
+    bash "$script"
+}
+
+show_tcp_status() {
+    say ""
+    say "拥塞控制:     $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '未知')"
+    say "默认队列:     $(sysctl -n net.core.default_qdisc 2>/dev/null || echo '未知')"
+    say "tcp_rmem:     $(sysctl -n net.ipv4.tcp_rmem 2>/dev/null || echo '未知')"
+    say "tcp_wmem:     $(sysctl -n net.ipv4.tcp_wmem 2>/dev/null || echo '未知')"
+    say "rmem_max:     $(sysctl -n net.core.rmem_max 2>/dev/null || echo '未知')"
+    say "wmem_max:     $(sysctl -n net.core.wmem_max 2>/dev/null || echo '未知')"
+    say "somaxconn:    $(sysctl -n net.core.somaxconn 2>/dev/null || echo '未知')"
+    say "tcp_tw_reuse: $(sysctl -n net.ipv4.tcp_tw_reuse 2>/dev/null || echo '未知')"
+    say ""
+    if [ -f /etc/sysctl.d/99-tcpfit.conf ]; then
+        ok "tcpfit 调优已应用（/etc/sysctl.d/99-tcpfit.conf 存在）"
+    else
+        info "尚未应用过 tcpfit 调优"
+    fi
+    if command -v tcpfit >/dev/null 2>&1; then
+        ok "tcpfit 命令已安装: $(command -v tcpfit)"
+    else
+        info "tcpfit 未安装到 /usr/local/bin（可直接用内置脚本运行）"
+    fi
+    local sp
+    if sp="$(tcpfit_script_path)"; then
+        ok "内置脚本: $sp"
+    fi
+}
+
+tcpfit_rollback() {
+    if ! command -v tcpfit >/dev/null 2>&1; then
+        err "未检测到 tcpfit 命令，无法回滚（请先安装或运行一次）"
+        return 1
+    fi
+    confirm "确认回滚 tcpfit 的全部改动?" n || return 0
+    tcpfit rollback
+}
+
+tcpfit_uninstall() {
+    if ! command -v tcpfit >/dev/null 2>&1; then
+        err "未检测到 tcpfit 命令"
+        return 1
+    fi
+    confirm "确认卸载 tcpfit（会先回滚改动）?" n || return 0
+    tcpfit uninstall
+}
+
+menu_tcp() {
+    local choice
+    while true; do
+        draw_header
+        printf '  TCP 调优 · 由 tcpfit 提供（MIT / kylin010）\n'
+        printf '%s----------------------------------------------------%s\n' "$C_W" "$C_0"
+        printf '  当前算法: %s    当前队列: %s\n' \
+            "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo '?')" \
+            "$(sysctl -n net.core.default_qdisc 2>/dev/null || echo '?')"
+        if command -v tcpfit >/dev/null 2>&1; then
+            printf '  tcpfit:   %s已安装%s\n' "$C_G" "$C_0"
+        else
+            printf '  tcpfit:   %s未安装%s（可用内置脚本直接运行）\n' "$C_Y" "$C_0"
+        fi
+        printf '%s----------------------------------------------------%s\n' "$C_W" "$C_0"
+        printf '  1) 启动 tcpfit 交互界面（推荐，含一键自动调优）\n'
+        printf '  2) 查看当前 TCP 参数\n'
+        printf '  3) 回滚 tcpfit 改动\n'
+        printf '  4) 卸载 tcpfit\n'
+        printf '  b) 返回主菜单\n'
+        printf '%s----------------------------------------------------%s\n' "$C_W" "$C_0"
+        read -r -p "请选择: " choice || return 0
+        case "$choice" in
+            1) run_tcpfit; pause ;;
+            2) show_tcp_status; pause ;;
+            3) tcpfit_rollback; pause ;;
+            4) tcpfit_uninstall; pause ;;
+            b|B|q|Q) return 0 ;;
+            *) warn "无效选项: $choice"; sleep 1 ;;
+        esac
+    done
+}
+
 menu_env() {
     local choice
     while true; do
@@ -872,6 +1017,7 @@ show_help() {
     say "  1. 安装 curl / wget / sudo / nftables"
     say "  2. 用 nftables 接管本机防火墙（自动停用 ufw / firewalld）"
     say "  3. 提供终端菜单管理防火墙与放行端口"
+    say "  4. 集成 tcpfit：按机器实测推导的 TCP 调优（主菜单第 3 项）"
     say ""
     say "默认放行端口（防火墙首次启用时写入）："
     printf '  %-8s %-6s %s\n' "端口" "协议" "服务"
@@ -901,16 +1047,18 @@ menu_main() {
         draw_status
         printf '  1) 防火墙管理\n'
         printf '  2) 基础环境 / 依赖安装\n'
-        printf '  3) 查看系统信息\n'
-        printf '  4) 使用帮助\n'
+        printf '  3) TCP 调优 (tcpfit)\n'
+        printf '  4) 查看系统信息\n'
+        printf '  5) 使用帮助\n'
         printf '  q) 退出\n'
         printf '%s----------------------------------------------------%s\n' "$C_W" "$C_0"
         read -r -p "请选择: " choice || return 0
         case "$choice" in
             1) menu_firewall ;;
             2) menu_env ;;
-            3) show_sysinfo; pause ;;
-            4) show_help; pause ;;
+            3) menu_tcp ;;
+            4) show_sysinfo; pause ;;
+            5) show_help; pause ;;
             q|Q|exit) return 0 ;;
             *) warn "无效选项: $choice"; sleep 1 ;;
         esac
